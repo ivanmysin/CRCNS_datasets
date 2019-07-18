@@ -2,7 +2,7 @@ import numpy as np
 import h5py
 import os
 import pandas as pd
-
+import shutil
 
 def get_val_from_xml(xml, teg, isvalint=True):
     val = xml.split(teg)[1][1:-2]
@@ -80,12 +80,20 @@ def get_spikes_data(path, ele_idx, nChannelsinElectode):
 
     return train, fets, sp_shapes, clusters_idxs
 ##########################################################################
-def encode2hdf5(topdir, datadir, target_path, origin_path, cells, sessions, files, epos):
+def copy_video_file(origin_path, session_name, target_path):
+    video_file = origin_path + session_name + ".m1v"
+    if os.path.isfile(video_file):
+        shutil.copy(video_file, target_path, follow_symlinks=True)
 
+    video_file = origin_path + session_name + ".mpg"
+    if os.path.isfile(video_file):
+        shutil.copy(video_file, target_path, follow_symlinks=True)
 
-    # datadir = "ec012ec.187"
+##########################################################################
+def encode2hdf5(topdir, datadir, target_path, origin_path, cells, sessions, files, epos, additional_whl_files_path):
 
-    animal_name = epos["animal"][sessions["topdir"] == topdir][0]
+    animal_name = epos["animal"][epos["topdir"] == topdir].values[0]
+
     if (sum( sessions["session"].where(sessions["topdir"] == topdir).isin([datadir]))  ) :
         session_name = datadir
 
@@ -110,11 +118,35 @@ def encode2hdf5(topdir, datadir, target_path, origin_path, cells, sessions, file
         h5file.attrs["voltageRange"] = metadata4channels["voltageRange"]
         h5file.attrs["date"] = metadata4channels["date"]
 
+        animalPosition = h5file.create_group('animalPosition')
+        animalPositionFile = origin_path + session_name + ".whl"
+        animalCoordinates = None
+        if (os.path.isfile(animalPositionFile)):
+            animalCoordinates = np.loadtxt(animalPositionFile)
+        else:
+            animalPositionFile = additional_whl_files_path + "/".join(animalPositionFile.split("/")[-2:])
+            if (os.path.isfile(animalPositionFile)):
+                animalCoordinates = np.loadtxt(animalPositionFile)
+
+        if not animalCoordinates is None:
+            animalPosition.create_dataset("xOfFirstLed", data=animalCoordinates[:, 0])
+            animalPosition.create_dataset("yOfFirstLed", data=animalCoordinates[:, 1])
+            animalPosition.create_dataset("xOfSecondLed", data=animalCoordinates[:, 2])
+            animalPosition.create_dataset("yOfSecondLed", data=animalCoordinates[:, 3])
+            animalPosition.attrs["coordinatesSampleRate"] = 39.06  # данные взяты из описания к hc-2 набору данных
+        else:
+            print("No file with data of aninaml position!")
+
+
+        copy_video_file(origin_path, session_name, target_path)
+
+
         n_electrodes = len(metadata4channels["channelsInElectrodes"])
         nChannels = metadata4channels["nChannels"]
 
         lfp = np.fromfile(origin_path + session_name + ".eeg", dtype=np.int16)
 
+        ch_idx_4lfp_indexing = 0
         # Цикл по электродам
         for ele_idx in range(n_electrodes):
             ele = h5file.create_group('electrode_' + str(ele_idx + 1) )
@@ -127,7 +159,8 @@ def encode2hdf5(topdir, datadir, target_path, origin_path, cells, sessions, file
 
             # Цикл по всем каналам
             for ch_idx in metadata4channels["channelsInElectrodes"][ele_idx]:
-                lfp_group.create_dataset("channel_"  + str(ch_idx + 1) , data = lfp[ch_idx::nChannels])
+                lfp_group.create_dataset("channel_"  + str(ch_idx + 1), data = lfp[ch_idx_4lfp_indexing::nChannels])
+                ch_idx_4lfp_indexing += 1
 
             if (ch_idx == nChannels-1):
                 continue
@@ -167,5 +200,5 @@ def encode2hdf5(topdir, datadir, target_path, origin_path, cells, sessions, file
 
                 cluster.create_dataset( "train", data=train[clusters_idxs == clu_idx] )
                 spike_shapes_slice = np.repeat(clusters_idxs == clu_idx, 32) # 32 - число отсчетов для сохранения формы импульса
-                cluster.create_dataset( "spike_shapes", data=spike_shapes[spike_shapes_slice, :] )
+                cluster.create_dataset( "spike_shapes", data=spike_shapes[spike_shapes_slice, :].reshape(-1, 32, nChannelsinElectode) )
                 cluster.create_dataset( "features", data=features[clusters_idxs == clu_idx] )

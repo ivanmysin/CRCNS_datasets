@@ -8,9 +8,12 @@ import tarfile
 metadata_path = "/media/ivan/Seagate Backup Plus Drive/Data/Data_from_CRCNS/hc-3/docs/hc3-metadata-tables/"
 cells, sessions, files, epos = rlib.get_metadata(metadata_path)
 
+# animal_name = epos["animal"][epos["topdir"] == "ec012ec.12"].values[0]
+
+
 origin_path = "/media/ivan/Seagate Backup Plus Drive/Data/Data_from_CRCNS/hc-3/" #  ec012ec.11/ec012ec.11/ec012ec.187/"
 target_path = "/media/ivan/Seagate Backup Plus Drive/Data/myCRCNC/hc-3/"  # target_path = "/media/ivan/Seagate Backup Plus Drive/Data/myCRCNC/hc-3/"  #
-
+additional_whl_files_path = "/media/ivan/Seagate Backup Plus Drive/Data/Data_from_CRCNS/hc-3/docs/additional_whl_files/"
 
 topdirs = epos["topdir"].unique().tolist()
 
@@ -34,8 +37,10 @@ for topdir in os.listdir(origin_path):
             os.makedirs(target_path4session)
         target_path4session += "/"
         origin_path4session = extract_path + topdir + "/" + uncompressed_file + "/"
-        rlib.encode2hdf5(topdir, uncompressed_file, target_path4session, origin_path4session, cells, sessions, files, epos)
+        rlib.encode2hdf5(topdir, uncompressed_file, target_path4session, origin_path4session, cells, sessions, files, epos, additional_whl_files_path)
 
-    break
+    #     break
+    # break
+
 
 
