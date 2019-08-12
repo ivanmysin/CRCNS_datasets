@@ -1,12 +1,38 @@
+import os
 import numpy as np
+import lib4reading_hc3_dataset as rlib
 import matplotlib.pyplot as plt
-import h5py
 
-file = "/media/ivan/Seagate Backup Plus Drive/Data/Data_from_CRCNS/hc-3/ec012ec.11/ec012ec.11/ec012ec.187/ec012ec.187.whl"
+nChannelsinElectode = 8
 
-file = "/media/ivan/Seagate Backup Plus Drive/Data/Data_from_CRCNS/hc-3/docs/additional_whl_files/" + "/".join(file.split("/")[-2:])
+spike_shapes_path = "/media/ivan/Seagate Backup Plus Drive/Data/Data_from_CRCNS/hc-3/ec014.n329/ec014.n329/2007-3-29_12-11-20/2007-3-29_12-11-20.spk.4"
+shapes_data = np.fromfile(spike_shapes_path, dtype=np.int16)
 
-print(file)
+sp_shapes = np.zeros((shapes_data.size // nChannelsinElectode, nChannelsinElectode))
+
+for idx in range(nChannelsinElectode):
+    sp_shapes[:, idx] = shapes_data[idx::nChannelsinElectode]
+
+plt.plot(sp_shapes[:32, :])
+plt.show()
+
+
+# metadata_path = "/media/ivan/Seagate Backup Plus Drive/Data/Data_from_CRCNS/hc-3/docs/hc3-metadata-tables/"
+# cells, sessions, metafiles, epos = rlib.get_metadata(metadata_path)
+#
+#
+# channelorderspath = "/media/ivan/Seagate Backup Plus Drive/Data/Data_from_CRCNS/hc-3/docs/channelorder/"
+#
+# channelorders = rlib.gelRipMaxPos(channelorderspath, epos, metafiles)
+#
+#
+#
+# print(channelorders)
+
+# import numpy as np
+# import matplotlib.pyplot as plt
+# import h5py
+
 
 
 

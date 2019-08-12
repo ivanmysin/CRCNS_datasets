@@ -4,6 +4,58 @@ import os
 import pandas as pd
 import shutil
 
+
+def gelRipMaxPos(channelorderspath, epos, metafiles):
+    channelorders = []
+
+    for file in sorted(os.listdir(channelorderspath)):
+
+        if file.find("RipMaxPosi.txt") == -1:
+            continue
+
+        animal_name = file.split(".")[0]
+
+        # print(epos["animal"].isin([animal_name]).sum())
+        if epos["animal"].isin([animal_name]).sum().astype(np.bool):
+            diaposon = file.split(".")[1]
+            diaposon_min, diaposon_max = diaposon.split("_")
+
+            diaposon_min = int(diaposon_min)
+            diaposon_max = int(diaposon_max)
+
+            for metafile in metafiles["session"].values:
+
+                animal_sess = metafile.split(".")
+                if len(animal_sess) != 2:
+                    continue
+                animal = animal_sess[0]
+                sess = int(animal_sess[1])
+                if (animal == animal_name and sess >= diaposon_min and sess <= diaposon_max):
+
+                    chor = {
+                        "animal": animal_name,
+                        "session": metafile,
+                        "shanks": [],
+                        "recording_cite": [],
+                    }
+
+                    ripposfile = open(channelorderspath + file, "r")
+
+                    for ripposline in ripposfile.readlines():
+                        shank, reccite = ripposline.split("\t")
+
+                        chor["shanks"].append(int(shank))
+                        chor["recording_cite"].append(int(reccite))
+
+                    ripposfile.close()
+
+                    channelorders.append(chor)
+    return channelorders
+
+
+
+
+
 def get_val_from_xml(xml, teg, isvalint=True):
     val = xml.split(teg)[1][1:-2]
     if isvalint:
@@ -23,7 +75,8 @@ def get_channels_in_electrodes(xml):
         for ch in el.split("channel"):
             if ch.find("skip") == -1:
                 continue
-            ch = int(ch[11:-2])
+            # print(ch[10:-2])
+            ch = int( ch.split(">")[1].split("<")[0] )
             electrodes[-1].append(ch)
 
     return electrodes
@@ -44,6 +97,9 @@ def get_data4readingchannels(metadatafile):
     metadata["date"] = get_val_from_xml(filecontent, "date", isvalint=False)
     metadata["experimenters"] = get_val_from_xml(filecontent, "experimenters", isvalint=False)
 
+    metadata["nSamples"] = get_val_from_xml(filecontent, "nSamples")
+    metadata["peakSampleIndex"] = get_val_from_xml(filecontent, "peakSampleIndex")
+    # print(metadata["nSamples"],  metadata["peakSampleIndex"])
     metadata["channelsInElectrodes"] = get_channels_in_electrodes(filecontent)
 
     # print(metadata)
@@ -90,15 +146,21 @@ def copy_video_file(origin_path, session_name, target_path):
         shutil.copy(video_file, target_path, follow_symlinks=True)
 
 ##########################################################################
-def encode2hdf5(topdir, datadir, target_path, origin_path, cells, sessions, files, epos, additional_whl_files_path):
-
+def encode2hdf5(topdir, datadir, target_path, origin_path, cells, sessions, files, epos, additional_whl_files_path, channelorders):
     animal_name = epos["animal"][epos["topdir"] == topdir].values[0]
 
     if (sum( sessions["session"].where(sessions["topdir"] == topdir).isin([datadir]))  ) :
         session_name = datadir
 
-    # print(animal_name)
-    # print(session_name)
+    shanks = []
+    for chor in channelorders:
+        if (chor["animal"] == animal_name and chor["session"] == session_name):
+            shanks = chor["shanks"]
+            recording_cite = chor["recording_cite"]
+
+
+    # if os.path.isfile(target_path + session_name + '.hdf5'):
+    #     return
 
     with h5py.File(target_path + session_name + '.hdf5', 'w') as h5file:
         h5file.attrs["animal"] = animal_name
@@ -143,6 +205,8 @@ def encode2hdf5(topdir, datadir, target_path, origin_path, cells, sessions, file
 
         n_electrodes = len(metadata4channels["channelsInElectrodes"])
         nChannels = metadata4channels["nChannels"]
+        nSamples = metadata4channels["nSamples"]
+        peakSampleIndex = metadata4channels["peakSampleIndex"]
 
         lfp = np.fromfile(origin_path + session_name + ".eeg", dtype=np.int16)
 
@@ -151,8 +215,8 @@ def encode2hdf5(topdir, datadir, target_path, origin_path, cells, sessions, file
         for ele_idx in range(n_electrodes):
             ele = h5file.create_group('electrode_' + str(ele_idx + 1) )
             # ele.attrs['stereotaxicCoordinates'] = 0 # !!!!!!!
+            brainZone = epos["e" + str(ele_idx + 1)][epos["topdir"] == topdir].values[0]
             ele.attrs['brainZone'] = epos["e" + str(ele_idx + 1)][epos["topdir"] == topdir].values[0]
-            # ele.attrs['layers'] = "channel_1 : alveuls; channel_2 : pyr;" # !!!!!!
 
             lfp_group = ele.create_group('lfp')
             lfp_group.attrs['lfpSamplingRate'] = metadata4channels["lfpSamplingRate"]
@@ -162,14 +226,27 @@ def encode2hdf5(topdir, datadir, target_path, origin_path, cells, sessions, file
                 lfp_group.create_dataset("channel_"  + str(ch_idx + 1), data = lfp[ch_idx_4lfp_indexing::nChannels])
                 ch_idx_4lfp_indexing += 1
 
+                if len(shanks) > 0:
+                    for sh in shanks:
+                        if sh == ele_idx + 1:
+                            for rec in recording_cite:
+                                if ch_idx_4lfp_indexing == rec:
+                                    #  + sh + 1
+                                    # print(brainZone, sh, ch_idx_4lfp_indexing)
+                                    # if not pyramidal_layer_index is None:
+                                    ele.attrs['pyramidal_layer'] = 1
+
             if (ch_idx == nChannels-1):
                 continue
 
             spikes_group = ele.create_group('spikes')
 
             nChannelsinElectode = len(metadata4channels["channelsInElectrodes"][ele_idx])
-            train, features, spike_shapes, clusters_idxs = get_spikes_data(origin_path + session_name, ele_idx, nChannelsinElectode)
 
+            try:
+                train, features, spike_shapes, clusters_idxs = get_spikes_data(origin_path + session_name, ele_idx, nChannelsinElectode)
+            except FileNotFoundError:
+                continue
             # По описанию: первое значение в файле .clu. - число кластеров, кладем его в отдельную переменную и удаляем из массива
             n_clusters = int(clusters_idxs[0])
             clusters_idxs = clusters_idxs[1:]
@@ -198,7 +275,11 @@ def encode2hdf5(topdir, datadir, target_path, origin_path, cells, sessions, file
                     cluster.attrs["quality"] = "Bad"
                     cluster.attrs["type"] = "None"
 
+                cluster.attrs["peakSampleIndex"] = peakSampleIndex
                 cluster.create_dataset( "train", data=train[clusters_idxs == clu_idx] )
-                spike_shapes_slice = np.repeat(clusters_idxs == clu_idx, 32) # 32 - число отсчетов для сохранения формы импульса
-                cluster.create_dataset( "spike_shapes", data=spike_shapes[spike_shapes_slice, :].reshape(-1, 32, nChannelsinElectode) )
+                spike_shapes_slice = np.repeat(clusters_idxs == clu_idx, nSamples) # nSamples - число отсчетов для сохранения формы импульса
+
+                # print(spike_shapes.shape, spike_shapes_slice.shape)
+
+                cluster.create_dataset( "spike_shapes", data=spike_shapes[spike_shapes_slice, :].reshape(-1, nSamples, nChannelsinElectode) )
                 cluster.create_dataset( "features", data=features[clusters_idxs == clu_idx] )
