@@ -124,16 +124,28 @@ def get_metadata(metadata_path):
 ##############################################################################
 def get_spikes_data(path, ele_idx, nChannelsinElectode):
     ele_idx += 1
-    train = np.loadtxt(path + ".res." + str(ele_idx) )
-    fets = np.loadtxt(path + ".fet." + str(ele_idx), skiprows=1 )
-    clusters_idxs = np.loadtxt(path + ".clu." + str(ele_idx) )
-
-    shapes_data = np.fromfile(path + ".spk." + str(ele_idx), dtype=np.int16)
-    sp_shapes = np.zeros((shapes_data.size // nChannelsinElectode, nChannelsinElectode))
-
-    for idx in range(nChannelsinElectode):
-        sp_shapes[:, idx] = shapes_data[idx::nChannelsinElectode]
-
+    try:
+        train = np.loadtxt(path + ".res." + str(ele_idx) )
+        fets = np.loadtxt(path + ".fet." + str(ele_idx), skiprows=1 )
+        clusters_idxs = np.loadtxt(path + ".clu." + str(ele_idx) )
+        shapes_data = np.fromfile(path + ".spk." + str(ele_idx), dtype=np.int16)
+       
+    except OSError:
+        train = np.empty(0)
+        fets = np.empty(0)
+        clusters_idxs = np.empty(0)
+        sp_shapes = np.empty(0)
+        
+    try:
+        sp_shapes = np.zeros((shapes_data.size // nChannelsinElectode, nChannelsinElectode), dtype=np.int16)
+        for idx in range(nChannelsinElectode):
+            sp_shapes[:, idx] = shapes_data[idx::nChannelsinElectode]
+    except ValueError:
+        sp_shapes = np.zeros(shape=(shapes_data.size//nChannelsinElectode+2, nChannelsinElectode), dtype=np.int16)
+        for idx in range(nChannelsinElectode):
+            sp_tmp = shapes_data[idx::nChannelsinElectode]
+            sp_shapes[:len(sp_tmp), idx] = sp_tmp
+        
     return train, fets, sp_shapes, clusters_idxs
 ##########################################################################
 def copy_video_file(origin_path, session_name, target_path):
@@ -248,6 +260,8 @@ def encode2hdf5(topdir, datadir, target_path, origin_path, cells, sessions, file
             except FileNotFoundError:
                 continue
             # По описанию: первое значение в файле .clu. - число кластеров, кладем его в отдельную переменную и удаляем из массива
+            if train.size == 0 or clusters_idxs.size==0:
+                continue
             n_clusters = int(clusters_idxs[0])
             clusters_idxs = clusters_idxs[1:]
 
@@ -280,6 +294,8 @@ def encode2hdf5(topdir, datadir, target_path, origin_path, cells, sessions, file
                 spike_shapes_slice = np.repeat(clusters_idxs == clu_idx, nSamples) # nSamples - число отсчетов для сохранения формы импульса
 
                 # print(spike_shapes.shape, spike_shapes_slice.shape)
-
-                cluster.create_dataset( "spike_shapes", data=spike_shapes[spike_shapes_slice, :].reshape(-1, nSamples, nChannelsinElectode) )
+                try:
+                    cluster.create_dataset( "spike_shapes", data=spike_shapes[spike_shapes_slice, :].reshape(-1, nSamples, nChannelsinElectode) )
+                except IndexError:
+                    pass
                 cluster.create_dataset( "features", data=features[clusters_idxs == clu_idx] )
